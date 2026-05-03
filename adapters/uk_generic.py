@@ -92,7 +92,10 @@ def _detect_dayfirst(series: pd.Series) -> bool:
 def _parse_date(value, dayfirst: bool):
     if pd.isna(value):
         return None
-    return pd.to_datetime(value, dayfirst=dayfirst, errors="coerce").date() if pd.to_datetime(value, dayfirst=dayfirst, errors="coerce") is not pd.NaT else None
+    parsed = pd.to_datetime(value, dayfirst=dayfirst, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
 
 
 def parse_uk_generic_csv(filepath: str | Path, source_account: str) -> List[Transaction]:
