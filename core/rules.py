@@ -18,6 +18,7 @@ INCOMING (priority order — first match wins):
   4.  reference contains a London airport    -> JOBS IN
   5.  desc contains "INSURANCE"              -> MISC PAYMENT IN
   6.  desc contains "LOAN"                   -> MISC PAYMENT IN
+      (override) +WALEED                     -> WALEED EXPENSE
   7.  desc/ref contains "WX21VZN" (or        -> WX21VZN IN
       "WX21 VZN" with a space)
   Tier-2 only:
@@ -28,10 +29,12 @@ INCOMING (priority order — first match wins):
 OUTGOING (priority order — first match wins):
   1.  is_job_related_topup                   -> JOBS OUT
   2.  desc contains "LOAN"                   -> MISC PAYMENT OUT
+      (override) +WALEED                     -> WALEED EXPENSE
   3.  desc contains "ZARYAB"                 -> EXPENSES (overrides Wages)
   3b. desc/ref contains "WAYZ"               -> WAYZ MOTORS  (NEW)
-  3c. desc contains WR19EOU or CA71ADZ       -> WALEED EXPENSE  (NEW —
-      owner's personal vehicles; business plates fall through)
+  3c. desc contains WR19EOU / CA71ADZ /      -> WALEED EXPENSE  (NEW —
+      BO07CEO                                   owner's personal vehicles;
+                                                business plates fall through)
   4.  type == CARD_PAYMENT and:
       a. is_parking                          -> PARKING
       b. is_ev_charging                      -> EQV OUT  (NEW: checked
@@ -319,6 +322,12 @@ def route(txn: Transaction) -> RoutingResult:
         if "WAYZ" in match_key:
             return RoutingResult("WAYZ MOTORS", "incoming.wayz")
 
+        # Rule 1c: Waleed loan/loan-return -> WALEED EXPENSE. Placed before
+        # TOPUP+job for the same reason as WAYZ — director capital movements
+        # would otherwise be captured by the "AD"-in-"ADded" quirk.
+        if "LOAN" in match_key and "WALEED" in match_key:
+            return RoutingResult("WALEED EXPENSE", "incoming.waleed_loan")
+
         # Rule 2: TOPUP + job/airport -> JOBS IN
         if _is_job_related_topup(type_upper, match_key):
             return RoutingResult("JOBS IN", "incoming.topup_job_related")
@@ -340,6 +349,7 @@ def route(txn: Transaction) -> RoutingResult:
             return RoutingResult("MISC PAYMENT IN", "incoming.insurance")
 
         # Rule 6: LOAN -> MISC PAYMENT IN
+        # (Waleed-loan override is rule 1c at the top of incoming.)
         if "LOAN" in match_key:
             return RoutingResult("MISC PAYMENT IN", "incoming.loan")
 
@@ -369,7 +379,11 @@ def route(txn: Transaction) -> RoutingResult:
             return RoutingResult("JOBS OUT", "outgoing.topup_job_related")
 
         # Rule 2: LOAN -> MISC PAYMENT OUT
+        # (override) Loans involving Waleed go to WALEED EXPENSE so director
+        # capital movements don't mix with third-party loans.
         if "LOAN" in match_key:
+            if "WALEED" in match_key:
+                return RoutingResult("WALEED EXPENSE", "outgoing.waleed_loan")
             return RoutingResult("MISC PAYMENT OUT", "outgoing.loan")
 
         # Rule 3: ZARYAB -> EXPENSES (override per your script)
@@ -380,12 +394,14 @@ def route(txn: Transaction) -> RoutingResult:
         if "WAYZ" in match_key:
             return RoutingResult("WAYZ MOTORS", "outgoing.wayz")
 
-        # Rule 3c: WR19EOU / CA71ADZ are owner's personal vehicles — route any
-        # outgoing tagged with these plates (DVLA, fines, repairs) to WALEED EXPENSE.
-        # (Business plates WX21VZN / WR24MRY / LC24YNH continue to fall through
-        # to EXPENSES via the default route, matching prior bookkeeping.)
+        # Rule 3c: WR19EOU / CA71ADZ / BO07CEO are owner's personal vehicles —
+        # route any outgoing tagged with these plates (DVLA, fines, repairs)
+        # to WALEED EXPENSE. (Business plates WX21VZN / WR24MRY / LO07RDG /
+        # LC24YNH / KM20YYX / KM20YYS / B22CEO continue to fall through to
+        # EXPENSES via the default route, matching prior bookkeeping.)
         if (_contains_token(match_key, "WR19EOU")
-                or _contains_token(match_key, "CA71ADZ")):
+                or _contains_token(match_key, "CA71ADZ")
+                or _contains_token(match_key, "BO07CEO")):
             return RoutingResult("WALEED EXPENSE", "outgoing.waleed_personal_vehicle")
 
         # Rule 4: TYPE-gated card payment routing
