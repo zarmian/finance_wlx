@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Local SQLite database (per CLAUDE.md / DEPLOY.md, this is dev-only)
+data/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
