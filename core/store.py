@@ -254,9 +254,12 @@ class Store:
             if not row:
                 return
             old = row[0] or ""
+            # An empty new_bucket means no rule matched — leave it for triage.
+            # Any non-empty bucket means a decision was made, clear needs_review.
+            needs_review = 0 if new_bucket else 1
             c.execute(
-                text("UPDATE transactions SET bucket = :b, needs_review = 0 WHERE txn_id = :id"),
-                {"b": new_bucket, "id": txn_id},
+                text("UPDATE transactions SET bucket = :b, needs_review = :nr WHERE txn_id = :id"),
+                {"b": new_bucket, "nr": needs_review, "id": txn_id},
             )
             self._log(c, txn_id, old, new_bucket, note)
 

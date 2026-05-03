@@ -118,8 +118,12 @@ def parse_pdf_statement(filepath: str | Path, source_account: str) -> List[Trans
         if amount == 0:
             continue
 
-        # PDFs often don't indicate sign reliably — assume debit unless explicit credit marker
-        # User will need to fix in review. We flag needs_review=True below.
+        # PDFs rarely sign amounts; if there's no explicit credit marker
+        # and no leading minus, assume debit. User confirms in review.
+        has_credit_marker = amount_str.upper().rstrip().endswith("CR")
+        had_explicit_sign = amount_str.lstrip().startswith(("-", "+", "(",))
+        if amount > 0 and not has_credit_marker and not had_explicit_sign:
+            amount = -amount
 
         balance = _parse_amount(balance_str) if balance_str else None
 
