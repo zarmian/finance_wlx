@@ -15,34 +15,36 @@ from typing import Optional, Tuple
 from core.schema import Transaction
 
 
-# Known vehicle registrations from your sheet.
-# Add more here as you acquire/dispose of vehicles.
+# Vehicle registrations recorded for the business.
+# Includes private/cherished plates (B22CEO, BO07CEO, LO07RDG) where the
+# UK age-format regex doesn't apply — these are matched by explicit name.
 KNOWN_VEHICLES = {
     "WX21VZN",
     "WR24MRY",
     "WR19EOU",
     "KM20YYX",
+    "KM20YYS",
     "LC24YNH",
     "CA71ADZ",
+    "B22CEO",
+    "BO07CEO",
+    "LO07RDG",
     # Logical vehicle group from your sheet
     "EQV",  # appears as "EQV IN/OUT" — your EV
 }
 
-# Drivers / people tracked in your sheet.
-# Maps known names → canonical tag.
+# Plate-change aliases — newer plate maps to older canonical plate so all
+# transactions for the same physical vehicle group together in P&L.
+VEHICLE_ALIASES = {
+    "BO07CEO": "CA71ADZ",
+    "LO07RDG": "WR24MRY",
+}
+
+# Directors only — non-director drivers' wages/jobs route via merchant
+# rules (JOBS OUT, EXPENSES) and don't need person-tagging.
 KNOWN_PEOPLE = {
     "WALEED": ["WALEED AHMED", "WALEED"],
-    "IMRAN": ["IMRAN NIAZI", "IMRAN"],
-    "HAFIZ": ["HAFIZ RAZA"],
-    "ZARYAB": ["ZARYAB RASHID", "ZARYAB"],
-    "SOHAIL": ["SOHAIL RIAZ"],
-    "SHAUKAT": ["SHAUKAT HUSSAIN", "MR SHAUKAT"],
-    "ALEX": ["ALEX PIRJOLEA"],
-    "MOUGHEES": ["MOUGHEES AFZAL"],
-    "TAMIM": ["TAMIM AHMED"],
-    "RIZWAN": ["RIZWAN IQBAL", "RIZWAN I"],
-    "IKRAM": ["IKRAM SHEIKH"],
-    "KASAHUN": ["KASAHUN", "KASAHUN K TECHEMA"],
+    "IMRAN": ["IMRAN ALI KHAN NIAZI", "IMRAN NIAZI", "IMRAN N", "IMRAN"],
 }
 
 
@@ -56,30 +58,46 @@ def _normalize_reg(s: str) -> str:
     return re.sub(r"\s+", "", s).upper()
 
 
+def _flexible_plate_pattern(plate: str) -> str:
+    """
+    Build a regex that matches the plate with optional whitespace at every
+    letter↔digit boundary, so KNOWN_VEHICLES entries like "B22CEO" match
+    both "B22CEO" and "B22 CEO" in source text.
+    """
+    parts = re.findall(r"[A-Z]+|\d+", plate.upper())
+    body = r"\s*".join(re.escape(p) for p in parts)
+    return rf"(^|[^A-Z0-9]){body}([^A-Z0-9]|$)"
+
+
+_VEHICLE_PATTERNS = {
+    v: re.compile(_flexible_plate_pattern(v)) for v in KNOWN_VEHICLES
+}
+
+
 def find_vehicle_tag(txn: Transaction) -> Optional[str]:
     """
     Find the vehicle reg plate associated with this transaction.
     Searches description + reference + payer.
 
-    Returns the canonical tag (e.g. "WX21VZN") or None.
+    Returns the canonical tag (e.g. "WX21VZN") or None. Plate aliases
+    (BO07CEO → CA71ADZ, LO07RDG → WR24MRY) collapse to the canonical name.
     """
     haystack = " ".join([
         txn.description, txn.reference, txn.payer, txn.raw_description
     ]).upper()
 
-    # First check exact known-vehicle matches (covers EQV which isn't a real plate)
-    for vehicle in KNOWN_VEHICLES:
-        # Look for the vehicle tag as a token (whitespace, punctuation, or start/end on either side)
-        pattern = rf"(^|[^A-Z0-9]){re.escape(vehicle)}([^A-Z0-9]|$)"
-        if re.search(pattern, haystack):
-            return vehicle
+    # First check exact known-vehicle matches (covers EQV which isn't a real
+    # plate, plus private plates like B22 CEO that don't fit the UK regex).
+    for vehicle, pat in _VEHICLE_PATTERNS.items():
+        if pat.search(haystack):
+            return VEHICLE_ALIASES.get(vehicle, vehicle)
 
     # Then try UK plate pattern in case there's a new plate we haven't catalogued
     matches = UK_REG_PATTERN.findall(haystack)
     if matches:
         # Take the first valid-looking match
         candidate = _normalize_reg(matches[0])
-        return candidate
+        return VEHICLE_ALIASES.get(candidate, candidate)
 
     return None
 

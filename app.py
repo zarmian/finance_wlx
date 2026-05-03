@@ -5,13 +5,12 @@ Run with: streamlit run app.py
 
 Tabs:
   1. Dashboard       — your existing summary, ported faithfully
-  2. Vehicle P&L     — per-vehicle income vs expenses (priority #3)
-  3. Driver P&L      — per-driver wages vs expenses
-  4. Triage          — review queue + assign bucket (priority #4)
-  5. VAT             — UK VAT return Boxes 1-9 (priority #5)
-  6. Transactions    — searchable, editable list
-  7. Import          — drop a statement, ingest (priority #1)
-  8. Move Log        — audit trail
+  2. Vehicle P&L     — per-vehicle income vs expenses
+  3. Triage          — review queue + assign bucket
+  4. VAT             — UK VAT return Boxes 1-9
+  5. Transactions    — searchable, editable list
+  6. Import          — drop a statement, ingest
+  7. Move Log        — audit trail
 """
 from __future__ import annotations
 import streamlit as st
@@ -246,15 +245,14 @@ if all_data.empty:
     with tab_import:
         _render_import = True  # Will hit the import section below
     # Continue to render import below
-    tab_dashboard = tab_vehicle = tab_driver = tab_triage = tab_vat = tab_tx = tab_log = None
+    tab_dashboard = tab_vehicle = tab_triage = tab_vat = tab_tx = tab_log = None
 
 else:
     tx_all = filter_df(all_data)
 
-    tab_dashboard, tab_vehicle, tab_driver, tab_triage, tab_vat, tab_tx, tab_import, tab_log = st.tabs([
+    tab_dashboard, tab_vehicle, tab_triage, tab_vat, tab_tx, tab_import, tab_log = st.tabs([
         "📊 Dashboard",
         "🚗 Vehicle P&L",
-        "👥 Driver P&L",
         "🔍 Triage",
         "🧾 VAT",
         "📋 Transactions",
@@ -447,53 +445,6 @@ if not all_data.empty:
                 v_tx[["date", "description", "amount", "bucket", "vat"]].style.format({
                     "amount": "£{:,.2f}",
                     "vat": lambda x: f"£{x:,.2f}" if pd.notna(x) else "",
-                }),
-                use_container_width=True, hide_index=True,
-            )
-
-
-# ============================================================
-# Tab: Driver P&L
-# ============================================================
-
-if not all_data.empty:
-    with tab_driver:
-        st.header("Driver P&L")
-        st.caption("Wages paid out and expenses attributed per driver/person.")
-
-        tagged = tx_all[tx_all["person_tag"].notna() & (tx_all["person_tag"] != "")]
-
-        if tagged.empty:
-            st.info("No transactions tagged with a person.")
-        else:
-            per_person = tagged.groupby("person_tag").agg(
-                received=("amount", lambda s: s[s > 0].sum()),
-                paid_out=("amount", lambda s: abs(s[s < 0].sum())),
-                txn_count=("amount", "count"),
-            ).reset_index()
-            per_person["net"] = per_person["received"] - per_person["paid_out"]
-            per_person = per_person.sort_values("paid_out", ascending=False)
-
-            st.dataframe(
-                per_person.rename(columns={
-                    "person_tag": "Person",
-                    "received": "Received",
-                    "paid_out": "Paid out",
-                    "net": "Net",
-                    "txn_count": "Transactions",
-                }).style.format({
-                    "Received": "£{:,.2f}",
-                    "Paid out": "£{:,.2f}",
-                    "Net": "£{:,.2f}",
-                }),
-                use_container_width=True, hide_index=True,
-            )
-
-            chosen_person = st.selectbox("Drill into person", per_person["person_tag"].tolist())
-            p_tx = tagged[tagged["person_tag"] == chosen_person].sort_values("date", ascending=False)
-            st.dataframe(
-                p_tx[["date", "description", "amount", "bucket"]].style.format({
-                    "amount": "£{:,.2f}",
                 }),
                 use_container_width=True, hide_index=True,
             )
