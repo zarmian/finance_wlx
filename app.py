@@ -190,6 +190,23 @@ with st.sidebar:
                 st.success(f"Re-categorized: {count} rows changed")
                 st.rerun()
 
+        st.divider()
+        with st.expander("⚠️ Danger zone"):
+            st.caption(
+                "Wipes every transaction and the move log. Accounts and "
+                "settings are kept. Use this before re-importing a fresh "
+                "history. Cannot be undone."
+            )
+            row_count = len(all_data)
+            confirm = st.text_input(
+                f"Type RESET to delete all {row_count} transaction(s)",
+                key="_reset_confirm",
+            )
+            if st.button("🗑️ Reset all data", disabled=(confirm != "RESET")):
+                store.reset_transactions()
+                st.success(f"Deleted {row_count} transaction(s). Refreshing...")
+                st.rerun()
+
 
 # ============================================================
 # Filter helper
