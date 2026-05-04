@@ -139,6 +139,20 @@ class Store:
         self.is_sqlite = self.db_url.startswith("sqlite")
         self._init_schema()
 
+    def backend_summary(self) -> dict:
+        """Human-readable info for the UI's database-status indicator."""
+        if self.is_sqlite:
+            path = self.db_url.replace("sqlite:///", "", 1)
+            return {"backend": "SQLite", "host": path, "ephemeral": True}
+        # Postgres URL: postgresql://user:pass@host:port/db
+        host = self.db_url
+        try:
+            after_at = host.split("@", 1)[1]
+            host = after_at.split("/", 1)[0]
+        except IndexError:
+            pass
+        return {"backend": "Postgres", "host": host, "ephemeral": False}
+
     @property
     def engine(self) -> Engine:
         if Store._engine_cache is None or Store._engine_url != self.db_url:

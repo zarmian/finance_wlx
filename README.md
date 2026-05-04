@@ -34,7 +34,7 @@ Faithfully ported from your `buildIncomingOutgoing()` in Apps Script — same pr
 
 **Outgoing**: TOPUP+job-related → JOBS OUT; LOAN → MISC PAYMENT OUT; ZARYAB override → EXPENSES; CARD_PAYMENT routing (parking/fuel/EV/default).
 
-**Tier-2 rules (opt-in)**: a sidebar toggle adds rules for predictable patterns your Apps Script left in the unmoved queue — DVLA, TfL, wages, 1st Nationwide, UK Fuels, fees. Default off = behavior matches your Apps Script exactly.
+**Recurring-pattern rules**: predictable transfers your Apps Script left in the unmoved queue (DVLA, TfL, wages, 1st Nationwide, UK Fuels, Haydock finance, Howden insurance, subcontractor TRANSFERs by airport / AD / JOB / invoice / postcode-TO / SERVICES) are auto-routed by default.
 
 **Bug fixes vs Apps Script**: removed duplicate `1ST NATIONWIDE` from your destinations push; the prompt-destination batch move no longer drops VAT data.
 
@@ -48,7 +48,7 @@ welux_finance/
 ├── core/
 │   ├── schema.py           # Transaction model
 │   ├── store.py            # SQLAlchemy store (SQLite or Postgres)
-│   ├── rules.py            # Apps Script port + Tier-2
+│   ├── rules.py            # Apps Script port + recurring-pattern rules
 │   ├── tagging.py          # vehicle/driver detection
 │   └── vat.py              # UK VAT return
 ├── data/                   # local SQLite (gitignored)

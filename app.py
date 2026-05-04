@@ -22,7 +22,6 @@ from pathlib import Path
 import tempfile
 import hmac
 
-import core.rules as rules_module
 from core.store import Store
 from core.rules import (
     route, apply_rules,
@@ -95,6 +94,26 @@ with st.sidebar:
     accounts = store.list_accounts()
     all_data = store.all()
 
+    # Database status — surfaces whether we're talking to your Supabase
+    # Postgres or have fallen back to local SQLite (which gets wiped on
+    # Streamlit Cloud restart).
+    info = store.backend_summary()
+    if info["backend"] == "Postgres":
+        st.caption(
+            f"🟢 **Postgres** · {info['host']} · {len(all_data)} row(s)"
+        )
+    else:
+        st.caption(
+            f"🟡 **SQLite (local)** · {len(all_data)} row(s)"
+        )
+        st.warning(
+            "Running on local SQLite. On Streamlit Cloud this means your "
+            "data will be wiped on every container restart. Set the "
+            "DATABASE_URL secret to your Supabase Postgres connection "
+            "string for persistent storage. See DEPLOY.md.",
+            icon="⚠️",
+        )
+
     if all_data.empty:
         st.info("No data yet. Import a statement to start.")
         date_range = (date.today() - timedelta(days=30), date.today())
@@ -149,18 +168,7 @@ with st.sidebar:
             selected_accounts = []
 
         st.divider()
-        # Tier-2 rules toggle
         st.subheader("⚙️ Settings")
-        tier2 = st.checkbox(
-            "Enable Tier-2 auto-rules",
-            value=rules_module.ENABLE_TIER2,
-            help="Auto-categorize recurring patterns (DVLA, TfL, wages, fees, "
-                  "1st Nationwide, UK Fuels) instead of leaving them for "
-                  "manual triage. Default off matches your Apps Script behavior."
-        )
-        if tier2 != rules_module.ENABLE_TIER2:
-            rules_module.ENABLE_TIER2 = tier2
-            st.info("Tier-2 toggled. Click 'Re-categorize all' below to apply to existing rows.")
 
         if st.button("🔄 Re-categorize all"):
             with st.spinner("Re-running rules..."):
@@ -235,8 +243,8 @@ if all_data.empty:
         2. The system parses it, applies your categorization rules, tags vehicles/drivers, and stores it
         3. Re-import next month — duplicates are detected by transaction ID
 
-        Your existing Apps Script logic is preserved. Tier-2 rules add automation
-        for predictable patterns (DVLA, TfL, wages, etc.) but are off by default.
+        Categorization rules cover Apps Script logic plus predictable
+        recurring patterns (DVLA, TfL, wages, vehicle finance, etc.).
         """
     )
 
@@ -460,8 +468,8 @@ if not all_data.empty:
         st.caption(
             "Transactions that the rules couldn't auto-classify. Set a bucket "
             "for each one. Saving applies to the database; rules don't get "
-            "modified — to teach the system about a recurring pattern, also "
-            "edit core/rules.py or enable Tier-2 in the sidebar."
+            "modified — to teach the system about a new recurring pattern, "
+            "edit core/rules.py."
         )
 
         review = store.needing_review()

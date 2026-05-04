@@ -1,62 +1,46 @@
 """
 Categorization rules engine.
 
-This is a faithful Python port of the Apps Script rules in your
-`buildIncomingOutgoing()` function. The matching logic, priority order, and
-TYPE-gating are all preserved.
+Routes every transaction to one bucket, in priority order. First match wins.
+The original Apps Script's `buildIncomingOutgoing()` rules are kept; the
+additional rules below them were derived from the historical bucket data.
 
-Rules are a port of your Apps Script's `buildIncomingOutgoing()` plus a
-small set of additions derived from your bucket history.
+INCOMING:
+  1.   payer/desc contains "A UDDIN"          -> KM20YYX IN
+  1b.  desc/ref contains "WAYZ"               -> WAYZ MOTORS
+  1c.  +WALEED + LOAN                         -> WALEED EXPENSE
+  2.   is_job_related_topup                   -> JOBS IN
+  3.   MONTCLARES/BLACKLANE/                  -> JOBS IN
+       WELUX CHAUFFEURS LTD
+  4.   reference contains a London airport    -> JOBS IN
+  5.   desc contains "INSURANCE"              -> MISC PAYMENT IN
+  6.   desc contains "LOAN"                   -> MISC PAYMENT IN
+  7.   "WX21VZN" / "WX21 VZN"                 -> WX21VZN IN
+  8.   reference == "INVESTMENT" exactly      -> MISC PAYMENT IN
+  9.   EXTRA_JOBS_IN_CLIENTS member           -> JOBS IN
+       (INTEL FM, AGIS/LUXOR, MACMILLAN,
+        AZ LUXE, TRANS LONDON, etc.)
 
-INCOMING (priority order — first match wins):
-  1.  payer/desc contains "A UDDIN"          -> KM20YYX IN
-  1b. desc/ref contains "WAYZ"               -> WAYZ MOTORS  (NEW — placed
-      before TOPUP+job because "ADded" substring otherwise pre-empts it)
-  2.  is_job_related_topup                   -> JOBS IN
-  3.  desc contains MONTCLARES/BLACKLANE/    -> JOBS IN
-      WELUX CHAUFFEURS LTD
-  4.  reference contains a London airport    -> JOBS IN
-  5.  desc contains "INSURANCE"              -> MISC PAYMENT IN
-  6.  desc contains "LOAN"                   -> MISC PAYMENT IN
-      (override) +WALEED                     -> WALEED EXPENSE
-  7.  desc/ref contains "WX21VZN" (or        -> WX21VZN IN
-      "WX21 VZN" with a space)
-  Tier-2 only:
-  8.  reference == "INVESTMENT" exactly      -> MISC PAYMENT IN
-  9.  desc contains an EXTRA_JOBS_IN_CLIENTS -> JOBS IN
-      member (INTEL FM, AGIS/LUXOR, etc.)
-
-OUTGOING (priority order — first match wins):
-  1.  is_job_related_topup                   -> JOBS OUT
-  2.  desc contains "LOAN"                   -> MISC PAYMENT OUT
-      (override) +WALEED                     -> WALEED EXPENSE
-  3.  desc contains "ZARYAB"                 -> EXPENSES (overrides Wages)
-  3b. desc/ref contains "WAYZ"               -> WAYZ MOTORS  (NEW)
-  3c. desc contains WR19EOU / CA71ADZ /      -> WALEED EXPENSE  (NEW —
-      BO07CEO                                   owner's personal vehicles;
-                                                business plates fall through)
-  4.  type == CARD_PAYMENT and:
-      a. is_parking                          -> PARKING
-      b. is_ev_charging                      -> EQV OUT  (NEW: checked
-         within is_fuel so SHELL EV / MFG EV / BP PULSE win over fuel)
-      c. is_fuel                             -> FUEL
-      d. else                                -> EXPENSES
-  Tier-2 only (after CARD_PAYMENT routing):
-  5.  Nationwide / UK Fuels / DVLA / TfL /   -> respective buckets
-      HMRC / fees / driver wages
-  6.  HAYDOCK FIN(ANCE)                      -> MISC PAYMENT OUT
-  7.  HOWDEN UK BROKERS                      -> MISC PAYMENT OUT
-  8.  TRANSFER + airport/AD<n>/JOB/INV<n>/   -> JOBS OUT
-      INVOICE/<postcode>TO<postcode>/
-      SERVICES ref
-
-`is_job_related_topup` requires:
-  - type == "TOPUP"
-  - AND (job-keyword OR airport-name OR airport-code-as-token)
-
-Bug fixes vs Apps Script (per your instruction "fix obvious bugs"):
-  - Removed duplicate "1ST NATIONWIDE" in destinations list
-  - Token-aware matching (already in your `containsToken_`) is preserved here
+OUTGOING:
+  1.   is_job_related_topup                   -> JOBS OUT
+  2.   desc contains "LOAN"                   -> MISC PAYMENT OUT
+       (override) +WALEED                     -> WALEED EXPENSE
+  3.   desc contains "ZARYAB"                 -> EXPENSES
+  3b.  desc/ref contains "WAYZ"               -> WAYZ MOTORS
+  3c.  WR19EOU / CA71ADZ / BO07CEO            -> WALEED EXPENSE
+       (Waleed's personal vehicles; business
+        plates fall through to EXPENSES)
+  4.   type == CARD_PAYMENT and:
+       a. is_parking                          -> PARKING
+       b. is_ev_charging                      -> EQV OUT
+       c. is_fuel                             -> FUEL
+       d. else                                -> EXPENSES
+  5.   Nationwide / UK Fuels / DVLA / TfL /   -> respective buckets
+       HMRC / fees / driver wages
+  6.   HAYDOCK FIN(ANCE)                      -> MISC PAYMENT OUT
+  7.   HOWDEN UK BROKERS                      -> MISC PAYMENT OUT
+  8.   TRANSFER + airport/AD<n>/JOB/INV<n>/   -> JOBS OUT
+       INVOICE/<postcode>TO<postcode>/SERV
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -386,17 +370,15 @@ def route(txn: Transaction) -> RoutingResult:
         if "WX21VZN" in match_key_compact:
             return RoutingResult("WX21VZN IN", "incoming.wx21vzn")
 
-        # === Tier-2 incoming rules (opt-in) ===
-        if ENABLE_TIER2:
-            # Family/lender capital top-ups: reference is exactly "INVESTMENT"
-            # (avoids matching "weluxrevinvestment" or other compound refs).
-            if ref_key.strip() == "INVESTMENT":
-                return RoutingResult("MISC PAYMENT IN", "incoming.investment")
+        # Rule 8: family/lender capital top-ups — reference exactly "INVESTMENT"
+        # (avoids matching "weluxrevinvestment" or other compound refs).
+        if ref_key.strip() == "INVESTMENT":
+            return RoutingResult("MISC PAYMENT IN", "incoming.investment")
 
-            # Additional recurring JOBS IN clients seen in historic books
-            for client in EXTRA_JOBS_IN_CLIENTS:
-                if client in match_key:
-                    return RoutingResult("JOBS IN", f"incoming.client_{client.lower().replace(' ', '_')}")
+        # Rule 9: additional recurring JOBS IN clients seen in historic books.
+        for client in EXTRA_JOBS_IN_CLIENTS:
+            if client in match_key:
+                return RoutingResult("JOBS IN", f"incoming.client_{client.lower().replace(' ', '_')}")
 
         # No match — needs review
         return RoutingResult("", "", needs_review=True)
@@ -443,61 +425,52 @@ def route(txn: Transaction) -> RoutingResult:
                 return RoutingResult("EQV OUT", "outgoing.card.ev_charging")
             return RoutingResult("EXPENSES", "outgoing.card.default")
 
-        # === Tier-2 rules (opt-in, beyond your Apps Script) ===
-        # These cover predictable recurring patterns your script left in the
-        # manual triage queue. They only fire if ENABLE_TIER2 is True.
-        # Default is False so behavior matches your Apps Script exactly —
-        # turn on when you're ready to reduce manual triage.
-        if ENABLE_TIER2:
-            # 1st Nationwide vehicle lease payments
-            if _has_any(match_key, NATIONWIDE_KEYWORDS):
-                return RoutingResult("1ST NATIONWIDE", "outgoing.nationwide_lease")
+        # === Recurring-pattern rules — covers predictable transfers/fees ===
+        # 1st Nationwide vehicle lease payments
+        if _has_any(match_key, NATIONWIDE_KEYWORDS):
+            return RoutingResult("1ST NATIONWIDE", "outgoing.nationwide_lease")
 
-            # UK Fuels card account top-up
-            if _has_any(match_key, UK_FUELS_KEYWORDS):
-                return RoutingResult("FUEL", "outgoing.uk_fuels")
+        # UK Fuels card account top-up
+        if _has_any(match_key, UK_FUELS_KEYWORDS):
+            return RoutingResult("FUEL", "outgoing.uk_fuels")
 
-            # DVLA payments — vehicle tax/fines
-            if _has_any(match_key, DVLA_KEYWORDS):
-                return RoutingResult("EXPENSES", "outgoing.dvla")
+        # DVLA payments — vehicle tax/fines (personal-vehicle DVLAs are
+        # caught by rule 3c above and routed to WALEED EXPENSE).
+        if _has_any(match_key, DVLA_KEYWORDS):
+            return RoutingResult("EXPENSES", "outgoing.dvla")
 
-            # TfL congestion / ULEZ
-            if _has_any(match_key, TFL_KEYWORDS):
-                return RoutingResult("EXPENSES", "outgoing.tfl")
+        # TfL congestion / ULEZ
+        if _has_any(match_key, TFL_KEYWORDS):
+            return RoutingResult("EXPENSES", "outgoing.tfl")
 
-            # HMRC tax payments
-            if _has_any(match_key, HMRC_KEYWORDS):
-                return RoutingResult("EXPENSES", "outgoing.hmrc")
+        # HMRC tax payments
+        if _has_any(match_key, HMRC_KEYWORDS):
+            return RoutingResult("EXPENSES", "outgoing.hmrc")
 
-            # Bank/payment-platform fees
-            if type_upper == "FEE" or _has_any(match_key, FEE_KEYWORDS):
-                return RoutingResult("EXPENSES", "outgoing.platform_fee")
+        # Bank/payment-platform fees
+        if type_upper == "FEE" or _has_any(match_key, FEE_KEYWORDS):
+            return RoutingResult("EXPENSES", "outgoing.platform_fee")
 
-            # Driver wages — TRANSFER with wage reference
-            if (type_upper == "TRANSFER"
-                and _has_any(match_key, WAGE_KEYWORDS)):
-                return RoutingResult("EXPENSES", "outgoing.driver_wages")
+        # Driver wages — TRANSFER with wage reference
+        if (type_upper == "TRANSFER"
+            and _has_any(match_key, WAGE_KEYWORDS)):
+            return RoutingResult("EXPENSES", "outgoing.driver_wages")
 
-            # Vehicle finance — Haydock recurring monthly debit
-            if _has_any(match_key, HAYDOCK_KEYWORDS):
-                return RoutingResult("MISC PAYMENT OUT", "outgoing.haydock_finance")
+        # Vehicle finance — Haydock recurring monthly debit
+        if _has_any(match_key, HAYDOCK_KEYWORDS):
+            return RoutingResult("MISC PAYMENT OUT", "outgoing.haydock_finance")
 
-            # Insurance broker premium payment (refunds are incoming)
-            if _has_any(match_key, HOWDEN_KEYWORDS):
-                return RoutingResult("MISC PAYMENT OUT", "outgoing.howden_insurance")
+        # Insurance broker premium payment (refunds are incoming)
+        if _has_any(match_key, HOWDEN_KEYWORDS):
+            return RoutingResult("MISC PAYMENT OUT", "outgoing.howden_insurance")
 
-            # Subcontractor job-payouts — outgoing TRANSFER with airport/AD/JOB
-            # reference. Mirrors the existing TOPUP+job rule for the incoming side.
-            if _is_outgoing_transfer_job(type_upper, match_key):
-                return RoutingResult("JOBS OUT", "outgoing.transfer_job_related")
+        # Subcontractor job-payouts — outgoing TRANSFER with airport/AD/JOB/
+        # INVOICE/postcode-TO/SERVICES reference.
+        if _is_outgoing_transfer_job(type_upper, match_key):
+            return RoutingResult("JOBS OUT", "outgoing.transfer_job_related")
 
-        # Non-card-payment outgoing with no specific rule — needs review
+        # Nothing matched — needs review
         return RoutingResult("", "", needs_review=True)
-
-
-# Set ENABLE_TIER2 = True in your local config to turn on the extra rules
-# above. Default OFF means default behavior matches your Apps Script.
-ENABLE_TIER2 = False
 
 
 def apply_rules(txn: Transaction) -> Transaction:

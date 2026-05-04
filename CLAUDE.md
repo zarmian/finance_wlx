@@ -38,7 +38,7 @@ These names are FROZEN — they match the original Apps Script and the owner's e
 
 `core/rules.py` has the rule engine. The rules are a **faithful port of `buildIncomingOutgoing()` from the original Apps Script**. Priority order is deliberate. Matching logic uses `containsToken_` (regex word boundaries) so e.g. "BP" doesn't match inside "PROBLEM" and "LCY" doesn't match inside "POLICY".
 
-**Tier-2 rules** are an extension beyond the original Apps Script — they catch predictable recurring patterns (DVLA, TfL, wages, 1st Nationwide, UK Fuels, fees) that the original script left in the manual triage queue. They're behind `ENABLE_TIER2` (default off) so default behavior matches Apps Script exactly. The user can toggle this in the Streamlit sidebar.
+**Recurring-pattern rules** (DVLA, TfL, wages, 1st Nationwide, UK Fuels, fees, Haydock finance, Howden insurance, subcontractor TRANSFERs with airport / AD<n> / JOB / INV<n> / postcode-TO / SERVICES references) used to live behind an `ENABLE_TIER2` toggle but are now baked in by default. The full priority ladder is in the docstring at the top of `core/rules.py`.
 
 **When asked to change rules, do the minimum:** add the new rule at the right priority slot. Don't restructure unless asked.
 
@@ -56,7 +56,7 @@ adapters/
 core/
   schema.py                  # Transaction dataclass — canonical format
   store.py                   # SQLAlchemy store, SQLite locally / Postgres prod
-  rules.py                   # Rule engine + Tier-2
+  rules.py                   # Rule engine
   tagging.py                 # Vehicle reg + driver name detection
   vat.py                     # UK VAT return Boxes 1-9
 ```
