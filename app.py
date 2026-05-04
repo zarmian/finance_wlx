@@ -81,7 +81,38 @@ if not _check_password():
     st.stop()
 
 
-store = Store()
+@st.cache_resource
+def _get_store() -> Store:
+    """One Store per process. SQLAlchemy engine + schema-init both cost
+    network round-trips on Supabase, so we share them across reruns."""
+    return Store()
+
+
+store = _get_store()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_all_transactions(_db_url: str) -> pd.DataFrame:
+    """Cached SELECT * FROM transactions. Cache key includes db_url so
+    swapping DATABASE_URL invalidates automatically."""
+    return store.all()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_accounts(_db_url: str) -> pd.DataFrame:
+    return store.list_accounts()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_move_log(_db_url: str, limit: int = 500) -> pd.DataFrame:
+    return store.move_log(limit=limit)
+
+
+def invalidate_cache() -> None:
+    """Call this after any write so the next render sees fresh data."""
+    _load_all_transactions.clear()
+    _load_accounts.clear()
+    _load_move_log.clear()
 
 
 # ============================================================
@@ -91,8 +122,8 @@ store = Store()
 with st.sidebar:
     st.title("💼 Welux Finance")
 
-    accounts = store.list_accounts()
-    all_data = store.all()
+    accounts = _load_accounts(store.db_url)
+    all_data = _load_all_transactions(store.db_url)
 
     # Database status — surfaces whether we're talking to your Supabase
     # Postgres or have fallen back to local SQLite (which gets wiped on
@@ -194,6 +225,7 @@ with st.sidebar:
                         store.update_bucket(t.txn_id, t.bucket, "Re-categorize")
                         store.update_tags(t.txn_id, t.asset_tag, t.person_tag)
                         count += 1
+                invalidate_cache()
                 st.success(f"Re-categorized: {count} rows changed")
                 st.rerun()
 
@@ -211,6 +243,7 @@ with st.sidebar:
             )
             if st.button("🗑️ Reset all data", disabled=(confirm != "RESET")):
                 store.reset_transactions()
+                invalidate_cache()
                 st.success(f"Deleted {row_count} transaction(s). Refreshing...")
                 st.rerun()
 
@@ -568,6 +601,7 @@ if not all_data.empty:
                     if row["select"]:
                         store.update_bucket(row["txn_id"], bulk_target, "Triage bulk move")
                         moved += 1
+                invalidate_cache()
                 st.success(f"Moved {moved} transaction(s) to {bulk_target}.")
                 st.rerun()
 
@@ -586,6 +620,7 @@ if not all_data.empty:
                         if row["person_tag"] != orig["person_tag"].iloc[0]:
                             store.update_tags(row["txn_id"], person_tag=row["person_tag"])
                 if applied:
+                    invalidate_cache()
                     st.success(f"Moved {applied} transaction(s).")
                     st.rerun()
                 else:
@@ -648,6 +683,7 @@ if not all_data.empty:
                     vat_amt = calc_vat_amount(row["amount"], rate, is_gross)
                     store.update_vat(row["txn_id"], vat_amt, rate)
                     count += 1
+                invalidate_cache()
                 st.success(f"Updated VAT on {count} row(s)")
                 st.rerun()
         else:
@@ -753,6 +789,7 @@ if not all_data.empty:
                 if row["select"]:
                     store.update_bucket(row["txn_id"], bulk_target_tx, "Transactions bulk move")
                     moved += 1
+            invalidate_cache()
             st.success(f"Moved {moved} transaction(s) to {bulk_target_tx}.")
             st.rerun()
 
@@ -815,6 +852,7 @@ with (tab_import if not all_data.empty else st.container()):
                 try:
                     with st.spinner(f"Parsing {uploaded.name}..."):
                         result = ingest_file(tmp_path, account_name, force_format=force_arg)
+                    invalidate_cache()
                     st.success(
                         f"Imported. Format: {result['format']}, "
                         f"parsed: {result['parsed']}, "
@@ -838,7 +876,7 @@ if not all_data.empty:
         st.header("Move Log")
         st.caption("Audit trail — every routing decision and manual edit.")
 
-        log_df = store.move_log(limit=500)
+        log_df = _load_move_log(store.db_url, limit=500)
         if log_df.empty:
             st.info("No log entries yet.")
         else:
