@@ -138,11 +138,16 @@ class Store:
 
     _engine_cache: Optional[Engine] = None
     _engine_url: Optional[str] = None
+    # Schema init issues ~12 round-trips. Class-level flag means we only
+    # pay that cost once per process, not on every Streamlit rerun.
+    _schema_initialized: bool = False
 
     def __init__(self, db_url: Optional[str] = None):
         self.db_url = db_url or _get_database_url()
         self.is_sqlite = self.db_url.startswith("sqlite")
-        self._init_schema()
+        if not Store._schema_initialized:
+            self._init_schema()
+            Store._schema_initialized = True
 
     def backend_summary(self) -> dict:
         """Human-readable info for the UI's database-status indicator."""
