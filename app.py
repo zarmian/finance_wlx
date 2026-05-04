@@ -502,9 +502,23 @@ if not all_data.empty:
                 "txn_id", "date", "description", "amount", "raw_type",
                 "asset_tag", "person_tag", "bucket"
             ]].copy()
-            edit_df.insert(0, "select", False)
+            triage_force = st.session_state.get("triage_force_select", False)
+            edit_df.insert(0, "select", triage_force)
             edit_df["new_bucket"] = ""
 
+            sa1, sa2, _ = st.columns([1, 1, 4])
+            with sa1:
+                if st.button("✅ Select all visible", key="triage_select_all"):
+                    st.session_state["triage_force_select"] = True
+                    st.session_state["triage_nonce"] = st.session_state.get("triage_nonce", 0) + 1
+                    st.rerun()
+            with sa2:
+                if st.button("❌ Clear all", key="triage_clear_all"):
+                    st.session_state["triage_force_select"] = False
+                    st.session_state["triage_nonce"] = st.session_state.get("triage_nonce", 0) + 1
+                    st.rerun()
+
+            triage_nonce = st.session_state.get("triage_nonce", 0)
             edited = st.data_editor(
                 edit_df,
                 use_container_width=True,
@@ -523,7 +537,7 @@ if not all_data.empty:
                     ),
                 },
                 hide_index=True,
-                key="triage_editor",
+                key=f"triage_editor_{triage_nonce}",
             )
 
             selected_count = int(edited["select"].sum())
@@ -669,8 +683,22 @@ if not all_data.empty:
 
         edit_df = df[["txn_id", "date", "source_account", "description", "amount",
                        "bucket", "asset_tag", "person_tag", "vat", "needs_review"]].copy()
-        edit_df.insert(0, "select", False)
+        tx_force = st.session_state.get("tx_force_select", False)
+        edit_df.insert(0, "select", tx_force)
 
+        sa1, sa2, _ = st.columns([1, 1, 4])
+        with sa1:
+            if st.button("✅ Select all visible", key="tx_select_all"):
+                st.session_state["tx_force_select"] = True
+                st.session_state["tx_nonce"] = st.session_state.get("tx_nonce", 0) + 1
+                st.rerun()
+        with sa2:
+            if st.button("❌ Clear all", key="tx_clear_all"):
+                st.session_state["tx_force_select"] = False
+                st.session_state["tx_nonce"] = st.session_state.get("tx_nonce", 0) + 1
+                st.rerun()
+
+        tx_nonce = st.session_state.get("tx_nonce", 0)
         edited_tx = st.data_editor(
             edit_df,
             use_container_width=True,
@@ -689,7 +717,7 @@ if not all_data.empty:
                 "vat": st.column_config.NumberColumn("VAT", disabled=True, format="£%.2f"),
                 "needs_review": st.column_config.CheckboxColumn("Review?", disabled=True, width="small"),
             },
-            key="tx_editor",
+            key=f"tx_editor_{tx_nonce}",
         )
 
         selected_count_tx = int(edited_tx["select"].sum())
