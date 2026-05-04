@@ -42,9 +42,14 @@ def _get_database_url() -> str:
             pass
 
     if url:
-        # Supabase gives postgres:// but SQLAlchemy needs postgresql://
-        if url.startswith("postgres://"):
-            url = "postgresql://" + url[len("postgres://"):]
+        # Supabase pastes the URL as either "postgres://" or "postgresql://".
+        # We use the psycopg (v3) driver explicitly because psycopg2-binary
+        # stopped publishing wheels at Python 3.12 and breaks on Streamlit
+        # Cloud's current 3.14 runtime.
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                url = "postgresql+psycopg://" + url[len(prefix):]
+                break
         return url
 
     # Local SQLite fallback
