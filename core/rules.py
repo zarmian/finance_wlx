@@ -46,7 +46,9 @@ OUTGOING (priority order — first match wins):
       HMRC / fees / driver wages
   6.  HAYDOCK FIN(ANCE)                      -> MISC PAYMENT OUT
   7.  HOWDEN UK BROKERS                      -> MISC PAYMENT OUT
-  8.  TRANSFER + airport/AD<n>/JOB ref       -> JOBS OUT
+  8.  TRANSFER + airport/AD<n>/JOB/INV<n>/   -> JOBS OUT
+      INVOICE/<postcode>TO<postcode>/
+      SERVICES ref
 
 `is_job_related_topup` requires:
   - type == "TOPUP"
@@ -147,12 +149,33 @@ def _is_job_related_topup(type_upper: str, match_key_upper: str) -> bool:
 # don't match.
 _AD_TOKEN_RE = re.compile(r"(^|[^A-Z0-9])AD(?=[\s\-0-9'’\"]|$)")
 
+# Driver invoice references: INV0239, INV450, INV 30, INVOICE: 2967, plain INV.
+# Must NOT match rent-style refs like "INV-1435" or "FC-INV-2026.01-0894" — the
+# negative lookahead on `\bINV\b` excludes the hyphenated rent variants.
+_INV_RE = re.compile(r"\bINV\d|\bINVOICE\b|\bINV\b(?!\s*-)")
+
+# Postcode-to-postcode job descriptions. Two flavours:
+#   glued:  "SE1TOLHR", "W12TOMAYFAIR", "BIRMTOLDN"
+#   spaced: "SE5 TO STANSTED", "29-7 EVURYTOFARNBROUGH"
+# Each chunk is at least 2 alphanumerics. "TO" sits between them; for the
+# spaced form it must be a whole word, otherwise we'd catch "TOPUP" / "TODAY".
+_POSTCODE_TO_RE = re.compile(
+    r"\b[A-Z][A-Z0-9]+TO[A-Z][A-Z0-9]+\b"
+    r"|\b[A-Z][A-Z0-9]+\s+TO\s+[A-Z][A-Z0-9]+\b"
+)
+
 
 def _is_outgoing_transfer_job(type_upper: str, match_key_upper: str) -> bool:
     """
     Tier-2 helper: outgoing TRANSFER that looks like a subcontractor
-    job-payout. Used to auto-route the historical ~30% of JOBS OUT rows
-    that follow the "<recipient> - <airport-code|AD<n>|JOB<x>>" pattern.
+    job-payout. Used to auto-route the historical JOBS OUT rows that
+    follow patterns like:
+      - "<recipient> - <airport-code|AD<n>|JOB<x>>"
+      - "<recipient> - INV<digits>" / "INVOICE: <n>"
+      - "<recipient> - <postcode>TO<postcode>"
+      - "<recipient> - SERVICES" / "SERV"
+    Card-payment expenses to "service" merchants (ESB, CHESS ICT) are not
+    TRANSFER type so they are filtered out by the type gate.
     """
     if type_upper != "TRANSFER":
         return False
@@ -163,6 +186,12 @@ def _is_outgoing_transfer_job(type_upper: str, match_key_upper: str) -> bool:
     if any(name in match_key_upper for name in LONDON_AIRPORT_NAMES):
         return True
     if any(_contains_token(match_key_upper, c) for c in LONDON_AIRPORT_CODES):
+        return True
+    if _INV_RE.search(match_key_upper):
+        return True
+    if _POSTCODE_TO_RE.search(match_key_upper):
+        return True
+    if "SERVICES" in match_key_upper or _contains_token(match_key_upper, "SERV"):
         return True
     return False
 
