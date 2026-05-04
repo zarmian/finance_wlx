@@ -470,19 +470,46 @@ if not all_data.empty:
         if review.empty:
             st.success("✓ No transactions in the triage queue for this period.")
         else:
-            st.markdown(f"**{len(review)} transaction(s) need a bucket assignment.**")
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                triage_search = st.text_input(
+                    "🔎 Search description / reference / payer",
+                    key="triage_search",
+                )
+            with c2:
+                bulk_target = st.selectbox(
+                    "Bulk move to →",
+                    options=["(pick a bucket)"] + ALL_BUCKETS,
+                    key="triage_bulk_target",
+                )
 
-            # Editable: assign bucket per row
-            edit_df = review[[
+            filtered = review
+            if triage_search:
+                sk = triage_search.upper()
+                mask = (
+                    filtered["description"].fillna("").str.upper().str.contains(sk, na=False)
+                    | filtered["payer"].fillna("").str.upper().str.contains(sk, na=False)
+                    | filtered["reference"].fillna("").str.upper().str.contains(sk, na=False)
+                )
+                filtered = filtered[mask]
+
+            st.markdown(
+                f"**{len(filtered)} of {len(review)} transaction(s) shown.** "
+                "Use the Select column for bulk moves, or set Move to → on individual rows."
+            )
+
+            edit_df = filtered[[
                 "txn_id", "date", "description", "amount", "raw_type",
                 "asset_tag", "person_tag", "bucket"
             ]].copy()
+            edit_df.insert(0, "select", False)
             edit_df["new_bucket"] = ""
 
             edited = st.data_editor(
                 edit_df,
                 use_container_width=True,
                 column_config={
+                    "select": st.column_config.CheckboxColumn("Select", width="small"),
                     "txn_id": st.column_config.TextColumn("ID", disabled=True, width="small"),
                     "date": st.column_config.DateColumn("Date", disabled=True),
                     "description": st.column_config.TextColumn("Description", disabled=True, width="large"),
@@ -499,7 +526,30 @@ if not all_data.empty:
                 key="triage_editor",
             )
 
-            if st.button("💾 Apply moves", type="primary"):
+            selected_count = int(edited["select"].sum())
+
+            b1, b2 = st.columns(2)
+            with b1:
+                bulk_clicked = st.button(
+                    f"📦 Move {selected_count} selected to {bulk_target}"
+                    if bulk_target != "(pick a bucket)" else
+                    f"📦 Move {selected_count} selected (pick a bucket first)",
+                    type="primary",
+                    disabled=(selected_count == 0 or bulk_target == "(pick a bucket)"),
+                )
+            with b2:
+                row_clicked = st.button("💾 Apply per-row moves")
+
+            if bulk_clicked:
+                moved = 0
+                for _, row in edited.iterrows():
+                    if row["select"]:
+                        store.update_bucket(row["txn_id"], bulk_target, "Triage bulk move")
+                        moved += 1
+                st.success(f"Moved {moved} transaction(s) to {bulk_target}.")
+                st.rerun()
+
+            if row_clicked:
                 applied = 0
                 for _, row in edited.iterrows():
                     new_b = row["new_bucket"]
@@ -507,10 +557,12 @@ if not all_data.empty:
                         store.update_bucket(row["txn_id"], new_b, "Triage move")
                         applied += 1
                     # Also persist any tag edits
-                    if row["asset_tag"] != edit_df[edit_df["txn_id"] == row["txn_id"]]["asset_tag"].iloc[0]:
-                        store.update_tags(row["txn_id"], asset_tag=row["asset_tag"])
-                    if row["person_tag"] != edit_df[edit_df["txn_id"] == row["txn_id"]]["person_tag"].iloc[0]:
-                        store.update_tags(row["txn_id"], person_tag=row["person_tag"])
+                    orig = edit_df[edit_df["txn_id"] == row["txn_id"]]
+                    if not orig.empty:
+                        if row["asset_tag"] != orig["asset_tag"].iloc[0]:
+                            store.update_tags(row["txn_id"], asset_tag=row["asset_tag"])
+                        if row["person_tag"] != orig["person_tag"].iloc[0]:
+                            store.update_tags(row["txn_id"], person_tag=row["person_tag"])
                 if applied:
                     st.success(f"Moved {applied} transaction(s).")
                     st.rerun()
