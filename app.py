@@ -640,11 +640,17 @@ if not all_data.empty:
     with tab_tx:
         st.header("Transactions")
 
-        c1, c2 = st.columns([3, 1])
+        c1, c2, c3 = st.columns([3, 1, 1])
         with c1:
             search = st.text_input("🔎 Search description / reference / payer")
         with c2:
             bucket_filter = st.selectbox("Bucket", ["(all)"] + ALL_BUCKETS)
+        with c3:
+            bulk_target_tx = st.selectbox(
+                "Bulk move to →",
+                options=["(pick a bucket)"] + ALL_BUCKETS,
+                key="tx_bulk_target",
+            )
 
         df = tx_all.copy()
         if search:
@@ -661,21 +667,58 @@ if not all_data.empty:
         df = df.sort_values("date", ascending=False)
         st.markdown(f"**{len(df)} matching transaction(s)**")
 
-        st.dataframe(
-            df[["date", "source_account", "description", "amount", "bucket",
-                 "asset_tag", "person_tag", "vat", "needs_review"]].style.format({
-                "amount": "£{:,.2f}",
-                "vat": lambda x: f"£{x:,.2f}" if pd.notna(x) else "",
-            }),
-            use_container_width=True, hide_index=True, height=600,
+        edit_df = df[["txn_id", "date", "source_account", "description", "amount",
+                       "bucket", "asset_tag", "person_tag", "vat", "needs_review"]].copy()
+        edit_df.insert(0, "select", False)
+
+        edited_tx = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            hide_index=True,
+            height=600,
+            column_config={
+                "select": st.column_config.CheckboxColumn("Select", width="small"),
+                "txn_id": st.column_config.TextColumn("ID", disabled=True, width="small"),
+                "date": st.column_config.DateColumn("Date", disabled=True),
+                "source_account": st.column_config.TextColumn("Account", disabled=True, width="small"),
+                "description": st.column_config.TextColumn("Description", disabled=True, width="large"),
+                "amount": st.column_config.NumberColumn("Amount", disabled=True, format="£%.2f"),
+                "bucket": st.column_config.TextColumn("Bucket", disabled=True),
+                "asset_tag": st.column_config.TextColumn("Vehicle", disabled=True, width="small"),
+                "person_tag": st.column_config.TextColumn("Person", disabled=True, width="small"),
+                "vat": st.column_config.NumberColumn("VAT", disabled=True, format="£%.2f"),
+                "needs_review": st.column_config.CheckboxColumn("Review?", disabled=True, width="small"),
+            },
+            key="tx_editor",
         )
 
-        st.download_button(
-            "📥 Export filtered as CSV",
-            df.to_csv(index=False),
-            file_name=f"transactions_{date_range[0]}_{date_range[1]}.csv",
-            mime="text/csv",
-        )
+        selected_count_tx = int(edited_tx["select"].sum())
+
+        b1, b2 = st.columns([2, 1])
+        with b1:
+            move_clicked_tx = st.button(
+                f"📦 Move {selected_count_tx} selected to {bulk_target_tx}"
+                if bulk_target_tx != "(pick a bucket)" else
+                f"📦 Move {selected_count_tx} selected (pick a bucket first)",
+                type="primary",
+                disabled=(selected_count_tx == 0 or bulk_target_tx == "(pick a bucket)"),
+            )
+        with b2:
+            st.download_button(
+                "📥 Export filtered as CSV",
+                df.to_csv(index=False),
+                file_name=f"transactions_{date_range[0]}_{date_range[1]}.csv",
+                mime="text/csv",
+            )
+
+        if move_clicked_tx:
+            moved = 0
+            for _, row in edited_tx.iterrows():
+                if row["select"]:
+                    store.update_bucket(row["txn_id"], bulk_target_tx, "Transactions bulk move")
+                    moved += 1
+            st.success(f"Moved {moved} transaction(s) to {bulk_target_tx}.")
+            st.rerun()
 
 
 # ============================================================
