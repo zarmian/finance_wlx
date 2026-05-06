@@ -40,15 +40,20 @@ def ingest_file(filepath: str | Path, source_account: str,
     fmt = force_format or detect_format(filepath)
     txns = parse(filepath, source_account, force_format=fmt)
 
-    # Apply rules then tagging
+    # Apply rules then tagging. Skip rules if the adapter already pinned
+    # a bucket (e.g. welux_history XLSX preserves manual classifications).
     for t in txns:
-        apply_rules(t)
+        if not t.bucket:
+            apply_rules(t)
         apply_tags(t)
 
     # Ensure account exists (creates it if it's the first time)
     store.upsert_account(source_account)
 
-    result = store.insert_transactions(txns)
+    # Historical XLSX should override bucket on existing rows so the
+    # manual classification wins over any earlier rule-based import.
+    overwrite_bucket = (fmt == "welux_history")
+    result = store.insert_transactions(txns, overwrite_bucket=overwrite_bucket)
     needs_review = sum(1 for t in txns if t.needs_review)
 
     return {

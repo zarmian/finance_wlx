@@ -802,10 +802,14 @@ with (tab_import if not all_data.empty else st.container()):
     st.header("Import Statement")
     st.markdown(
         "Drop a Wise/Revolut, Monzo, or any UK bank CSV. PDFs are also accepted but "
-        "less reliable — prefer CSV when possible."
+        "less reliable — prefer CSV when possible. **XLSX** is supported for "
+        "the historical Welux spreadsheet — every row keeps the bucket from its "
+        "sheet (JOBS IN, EXPENSES, …) so manual classifications carry over."
     )
 
-    uploaded = st.file_uploader("Choose file", type=["csv", "pdf"], key="upload")
+    uploaded = st.file_uploader(
+        "Choose file", type=["csv", "pdf", "xlsx"], key="upload",
+    )
 
     if uploaded:
         # Save to temp
@@ -839,7 +843,7 @@ with (tab_import if not all_data.empty else st.container()):
 
         force_format = st.selectbox(
             "Force format (override detection)",
-            ["(use detected)", "wise", "monzo", "uk_generic", "pdf"],
+            ["(use detected)", "wise", "monzo", "uk_generic", "pdf", "welux_history"],
         )
         force_arg = "" if force_format == "(use detected)" else force_format
 
