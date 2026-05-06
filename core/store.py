@@ -210,11 +210,32 @@ class Store:
 
     # ---------- Transaction insert ----------
 
-    def insert_transactions(self, txns: Iterable[Transaction]) -> dict:
+    def insert_transactions(self, txns: Iterable[Transaction],
+                              overwrite_bucket: bool = False) -> dict:
+        """
+        Insert transactions. By default duplicates (same txn_id) are
+        silently skipped via ON CONFLICT DO NOTHING.
+
+        When `overwrite_bucket=True`, on conflict we instead UPDATE the
+        bucket / rule_applied / needs_review columns from the incoming
+        row. Used by the historical-XLSX importer so the user's manual
+        classifications win over any earlier rule-based import.
+        """
         inserted = 0
         duplicates = 0
+        updated = 0
 
-        sql = """
+        if overwrite_bucket:
+            on_conflict = (
+                "ON CONFLICT (txn_id) DO UPDATE SET "
+                "bucket = EXCLUDED.bucket, "
+                "rule_applied = EXCLUDED.rule_applied, "
+                "needs_review = EXCLUDED.needs_review"
+            )
+        else:
+            on_conflict = "ON CONFLICT (txn_id) DO NOTHING"
+
+        sql = f"""
         INSERT INTO transactions (
             txn_id, source_account, date, description, amount,
             raw_type, payer, reference, raw_description, fee,
@@ -228,7 +249,7 @@ class Store:
             :vat, :vat_rate, :notes, :rule_applied, :needs_review,
             :source_file, :raw_payload
         )
-        ON CONFLICT (txn_id) DO NOTHING
+        {on_conflict}
         """
 
         with self.conn() as c:
@@ -260,8 +281,11 @@ class Store:
                 result = c.execute(text(sql), params)
                 if result.rowcount > 0:
                     inserted += 1
-                    self._log(c, t.txn_id, None, t.bucket or "Unmoved",
-                              "Imported" + (" + auto-routed" if t.bucket else ""))
+                    note = (
+                        "History import (bucket pinned)" if overwrite_bucket
+                        else "Imported" + (" + auto-routed" if t.bucket else "")
+                    )
+                    self._log(c, t.txn_id, None, t.bucket or "Unmoved", note)
                 else:
                     duplicates += 1
 
