@@ -23,7 +23,7 @@ from typing import List
 
 import pandas as pd
 
-from core.schema import Transaction, make_txn_id
+from core.schema import Transaction, make_txn_id, MISSING_DATE
 
 
 # Bucket-sheet names recognized by this adapter. Mirrors core.rules
@@ -106,7 +106,10 @@ def parse_welux_history_xlsx(filepath: str | Path,
 
             d = _to_date(row["Date"])
             if d is None:
-                continue
+                # Sheet had a blank date cell — keep the row with a
+                # placeholder; importing the matching Wise CSV will
+                # later fill the real date in.
+                d = MISSING_DATE
 
             description = str(row["Description"]).strip() if not pd.isna(row["Description"]) else ""
             if not description:

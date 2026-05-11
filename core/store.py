@@ -233,7 +233,15 @@ class Store:
                 "needs_review = EXCLUDED.needs_review"
             )
         else:
-            on_conflict = "ON CONFLICT (txn_id) DO NOTHING"
+            # Regular imports are idempotent (DO NOTHING) — except that
+            # they fill the date column when the existing row is using
+            # the MISSING_DATE placeholder (a holdover from a history
+            # XLSX import where the source sheet had a blank date).
+            on_conflict = (
+                "ON CONFLICT (txn_id) DO UPDATE SET "
+                "date = EXCLUDED.date "
+                "WHERE transactions.date = '1900-01-01'"
+            )
 
         sql = f"""
         INSERT INTO transactions (
@@ -278,13 +286,27 @@ class Store:
                     "source_file": t.source_file,
                     "raw_payload": t.raw_payload,
                 }
+                # If this is a fresh insert, the row didn't exist beforehand.
+                # We need that signal because in non-overwrite mode the
+                # ON CONFLICT clause also bumps rowcount when it fills a
+                # placeholder date — we don't want to log that as "Imported".
+                pre_existed = False
+                if not overwrite_bucket:
+                    pre = c.execute(
+                        text("SELECT 1 FROM transactions WHERE txn_id = :id"),
+                        {"id": t.txn_id},
+                    ).first()
+                    pre_existed = pre is not None
+
                 result = c.execute(text(sql), params)
                 if result.rowcount > 0:
                     inserted += 1
-                    note = (
-                        "History import (bucket pinned)" if overwrite_bucket
-                        else "Imported" + (" + auto-routed" if t.bucket else "")
-                    )
+                    if overwrite_bucket:
+                        note = "History import (bucket pinned)"
+                    elif pre_existed:
+                        note = "Date filled from re-imported statement"
+                    else:
+                        note = "Imported" + (" + auto-routed" if t.bucket else "")
                     self._log(c, t.txn_id, None, t.bucket or "Unmoved", note)
                 else:
                     duplicates += 1
