@@ -11,6 +11,13 @@ import hashlib
 import json
 
 
+# Placeholder used when a row has no usable date (e.g. the historical
+# Welux XLSX had blank Date cells on a handful of rows). Re-importing
+# the corresponding Wise CSV fills in the real date — see Store
+# .insert_transactions.
+MISSING_DATE = date(1900, 1, 1)
+
+
 @dataclass
 class Transaction:
     # === Identity ===
