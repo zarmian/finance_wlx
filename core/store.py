@@ -166,11 +166,21 @@ class Store:
     @property
     def engine(self) -> Engine:
         if Store._engine_cache is None or Store._engine_url != self.db_url:
+            connect_args: dict = {}
+            if not self.is_sqlite:
+                # Supabase's pooler (PgBouncer) runs in transaction mode,
+                # which multiplexes connections — a prepared statement
+                # created in one txn can vanish before the next runs,
+                # yielding "prepared statement _pg3_N does not exist".
+                # Telling psycopg3 not to prepare statements at all avoids
+                # the issue with negligible perf impact for our query mix.
+                connect_args["prepare_threshold"] = None
             Store._engine_cache = create_engine(
                 self.db_url,
                 pool_pre_ping=True,
                 pool_size=2 if not self.is_sqlite else 5,
                 max_overflow=5,
+                connect_args=connect_args,
             )
             Store._engine_url = self.db_url
         return Store._engine_cache

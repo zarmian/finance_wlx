@@ -591,9 +591,10 @@ if not all_data.empty:
                     f"📦 Move {selected_count} selected (pick a bucket first)",
                     type="primary",
                     disabled=(selected_count == 0 or bulk_target == "(pick a bucket)"),
+                    key="triage_bulk_move",
                 )
             with b2:
-                row_clicked = st.button("💾 Apply per-row moves")
+                row_clicked = st.button("💾 Apply per-row moves", key="triage_apply_per_row")
 
             if bulk_clicked:
                 moved = 0
@@ -774,6 +775,7 @@ if not all_data.empty:
                 f"📦 Move {selected_count_tx} selected (pick a bucket first)",
                 type="primary",
                 disabled=(selected_count_tx == 0 or bulk_target_tx == "(pick a bucket)"),
+                key="tx_bulk_move",
             )
         with b2:
             st.download_button(
