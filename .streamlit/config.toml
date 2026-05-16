@@ -1,0 +1,9 @@
+# Deployment-friendly defaults. CORS / XSRF are off because Cloudflare
+# Access fronts the production app; locally there's nothing to attack.
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false

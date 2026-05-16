@@ -1,0 +1,33 @@
+# Local dev artifacts — not needed in the image
+data/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Git history
+.git/
+.gitignore
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+
+# The historical XLSX is private financial data; users upload it via the
+# Streamlit file uploader instead of having it baked into the image.
+account-statement_*.xlsx
+
+# Sample statements are fixtures, not needed in prod.
+sample_statements/
+
+# Local docs that don't need to ship with the container.
+DEPLOY.md
+DEPLOY_FLY.md
+CLAUDE.md
+README.md
