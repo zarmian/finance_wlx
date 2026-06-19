@@ -310,26 +310,38 @@ if not all_data.empty:
     with tab_dashboard:
         st.header(f"Dashboard  ·  {date_range[0]} → {date_range[1]}")
 
-        # Build summary in your Apps Script structure
-        # JOBS, WX21VZN, EQV, MISC PAYMENT — IN/OUT pairs
-        # EXPENSES, FUEL, WALEED EXPENSE, IMRAN EXPENSE, WAYZ MOTORS — OUT only
-
+        # Two flavours of bucket on the dashboard:
+        #   "split"  — IN bucket and OUT bucket are separate (e.g. JOBS IN
+        #              + JOBS OUT). IN comes from the IN bucket (positive
+        #              amounts), OUT from the OUT bucket.
+        #   "signed" — a single bucket holds both directions, e.g. WALEED
+        #              EXPENSE has expenses out AND reimbursements in.
+        #              Positive amounts -> IN column, negative -> OUT column.
         groups = [
-            ("JOBS", "JOBS IN", "JOBS OUT"),
-            ("WX21VZN", "WX21VZN IN", "WX21VZN OUT"),
-            ("EQV", "EQV IN", "EQV OUT"),
-            ("KM20YYX", "KM20YYX IN", None),  # No KM20YYX OUT in your script
-            ("MISC PAYMENT", "MISC PAYMENT IN", "MISC PAYMENT OUT"),
-        ]
-        expense_only = [
-            "EXPENSES", "FUEL", "PARKING", "WALEED EXPENSE",
-            "IMRAN EXPENSE", "WAYZ MOTORS", "1ST NATIONWIDE", "WATER + OTHER",
+            ("JOBS",          "JOBS IN",         "JOBS OUT",         "split"),
+            ("WX21VZN",       "WX21VZN IN",      "WX21VZN OUT",      "split"),
+            ("EQV",           "EQV IN",          "EQV OUT",          "split"),
+            ("KM20YYX",       "KM20YYX IN",      None,               "split"),
+            ("MISC PAYMENT",  "MISC PAYMENT IN", "MISC PAYMENT OUT", "split"),
+            ("EXPENSES",       None,             None,               "signed"),
+            ("FUEL",           None,             None,               "signed"),
+            ("PARKING",        None,             None,               "signed"),
+            ("WALEED EXPENSE", None,             None,               "signed"),
+            ("IMRAN EXPENSE",  None,             None,               "signed"),
+            ("WAYZ MOTORS",    None,             None,               "signed"),
+            ("1ST NATIONWIDE", None,             None,               "signed"),
+            ("WATER + OTHER",  None,             None,               "signed"),
         ]
 
         rows = []
-        for label, in_bucket, out_bucket in groups:
-            in_df = tx_all[tx_all["bucket"] == in_bucket] if in_bucket else pd.DataFrame()
-            out_df = tx_all[tx_all["bucket"] == out_bucket] if out_bucket else pd.DataFrame()
+        for label, in_bucket, out_bucket, kind in groups:
+            if kind == "split":
+                in_df = tx_all[tx_all["bucket"] == in_bucket] if in_bucket else pd.DataFrame()
+                out_df = tx_all[tx_all["bucket"] == out_bucket] if out_bucket else pd.DataFrame()
+            else:  # signed — single bucket, split by amount sign
+                bucket_rows = tx_all[tx_all["bucket"] == label]
+                in_df = bucket_rows[bucket_rows["amount"] > 0]
+                out_df = bucket_rows[bucket_rows["amount"] < 0]
 
             in_amt = in_df["amount"].sum() if not in_df.empty else 0
             out_amt = abs(out_df["amount"].sum()) if not out_df.empty else 0
@@ -352,23 +364,6 @@ if not all_data.empty:
                 "VAT OUT %": out_cov,
             })
 
-        for label in expense_only:
-            out_df = tx_all[tx_all["bucket"] == label]
-            out_amt = abs(out_df["amount"].sum()) if not out_df.empty else 0
-            out_vat = abs(out_df["vat"].sum()) if not out_df.empty and out_df["vat"].notna().any() else 0
-            out_cov = (out_df["vat"].notna().mean() * 100) if not out_df.empty else 0
-
-            rows.append({
-                "Category": label,
-                "IN": None,
-                "OUT": out_amt,
-                "BALANCE": -out_amt,
-                "VAT IN": None,
-                "VAT OUT": out_vat,
-                "VAT IN %": None,
-                "VAT OUT %": out_cov,
-            })
-
         summary_df = pd.DataFrame(rows)
 
         # Profit from jobs (your Apps Script definition: jobs balance only)
@@ -385,15 +380,15 @@ if not all_data.empty:
 
         st.divider()
 
-        # Summary table
+        # Summary table — every bucket now has IN / OUT / BALANCE columns
         st.subheader("Category Summary")
         styled = summary_df.style.format({
-            "IN": lambda x: f"£{x:,.2f}" if pd.notna(x) else "",
+            "IN": "£{:,.2f}",
             "OUT": "£{:,.2f}",
             "BALANCE": "£{:,.2f}",
-            "VAT IN": lambda x: f"£{x:,.2f}" if pd.notna(x) else "",
+            "VAT IN": "£{:,.2f}",
             "VAT OUT": "£{:,.2f}",
-            "VAT IN %": lambda x: f"{x:.0f}%" if pd.notna(x) else "",
+            "VAT IN %": "{:.0f}%",
             "VAT OUT %": "{:.0f}%",
         })
         st.dataframe(styled, use_container_width=True, hide_index=True)
@@ -695,105 +690,161 @@ if not all_data.empty:
 # Tab: Transactions
 # ============================================================
 
+TX_DISPLAY_LIMIT = 500   # cap rows per bucket sub-tab for editor responsiveness
+
+
+def _render_tx_subtab(scope_df: pd.DataFrame, key_suffix: str, scope_label: str):
+    """Search + selectable table + totals + bulk-move for one bucket sub-tab.
+    `scope_df` is the rows belonging to this bucket (or all rows for "All")."""
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        search = st.text_input(
+            "🔎 Search description / reference / payer",
+            key=f"tx_search_{key_suffix}",
+        )
+    with c2:
+        bulk_target = st.selectbox(
+            "Bulk move to →",
+            options=["(pick a bucket)"] + ALL_BUCKETS,
+            key=f"tx_bulk_target_{key_suffix}",
+        )
+
+    df = scope_df
+    if search:
+        sk = search.upper()
+        mask = (
+            df["description"].str.upper().str.contains(sk, na=False)
+            | df["payer"].fillna("").str.upper().str.contains(sk, na=False)
+            | df["reference"].fillna("").str.upper().str.contains(sk, na=False)
+        )
+        df = df[mask]
+
+    df = df.sort_values("date", ascending=False)
+    total_rows = len(df)
+
+    if total_rows > TX_DISPLAY_LIMIT:
+        st.caption(
+            f"Showing latest {TX_DISPLAY_LIMIT} of {total_rows:,} rows. "
+            "Search to narrow further — totals below reflect all matching rows."
+        )
+        display_df = df.head(TX_DISPLAY_LIMIT)
+    else:
+        st.caption(f"{total_rows:,} matching row(s)")
+        display_df = df
+
+    force_key = f"tx_force_{key_suffix}"
+    nonce_key = f"tx_nonce_{key_suffix}"
+    force_select = st.session_state.get(force_key, False)
+    nonce = st.session_state.get(nonce_key, 0)
+
+    sa1, sa2, _ = st.columns([1, 1, 4])
+    with sa1:
+        if st.button("✅ Select all visible", key=f"tx_sa_{key_suffix}"):
+            st.session_state[force_key] = True
+            st.session_state[nonce_key] = nonce + 1
+            st.rerun()
+    with sa2:
+        if st.button("❌ Clear all", key=f"tx_clear_{key_suffix}"):
+            st.session_state[force_key] = False
+            st.session_state[nonce_key] = nonce + 1
+            st.rerun()
+
+    edit_df = display_df[["txn_id", "date", "source_account", "description", "amount",
+                           "bucket", "asset_tag", "person_tag", "vat", "needs_review"]].copy()
+    edit_df.insert(0, "select", force_select)
+
+    edited = st.data_editor(
+        edit_df,
+        use_container_width=True,
+        hide_index=True,
+        height=520,
+        column_config={
+            "select": st.column_config.CheckboxColumn("Select", width="small"),
+            "txn_id": st.column_config.TextColumn("ID", disabled=True, width="small"),
+            "date": st.column_config.DateColumn("Date", disabled=True),
+            "source_account": st.column_config.TextColumn("Account", disabled=True, width="small"),
+            "description": st.column_config.TextColumn("Description", disabled=True, width="large"),
+            "amount": st.column_config.NumberColumn("Amount", disabled=True, format="£%.2f"),
+            "bucket": st.column_config.TextColumn("Bucket", disabled=True),
+            "asset_tag": st.column_config.TextColumn("Vehicle", disabled=True, width="small"),
+            "person_tag": st.column_config.TextColumn("Person", disabled=True, width="small"),
+            "vat": st.column_config.NumberColumn("VAT", disabled=True, format="£%.2f"),
+            "needs_review": st.column_config.CheckboxColumn("Review?", disabled=True, width="small"),
+        },
+        key=f"tx_editor_{key_suffix}_{nonce}",
+    )
+
+    # Totals row across ALL matching rows (not just displayed page).
+    in_total = df.loc[df["amount"] > 0, "amount"].sum()
+    out_total = abs(df.loc[df["amount"] < 0, "amount"].sum())
+    net = in_total - out_total
+    st.markdown(
+        f"**Totals — {scope_label} · {total_rows:,} row(s)**  ·  "
+        f"In: £{in_total:,.2f}  ·  Out: £{out_total:,.2f}  ·  "
+        f"Net: £{net:,.2f}"
+    )
+
+    selected_count = int(edited["select"].sum())
+    b1, b2 = st.columns([2, 1])
+    with b1:
+        move_clicked = st.button(
+            f"📦 Move {selected_count} selected to {bulk_target}"
+            if bulk_target != "(pick a bucket)" else
+            f"📦 Move {selected_count} selected (pick a bucket first)",
+            type="primary",
+            disabled=(selected_count == 0 or bulk_target == "(pick a bucket)"),
+            key=f"tx_move_{key_suffix}",
+        )
+    with b2:
+        st.download_button(
+            "📥 Export filtered as CSV",
+            df.to_csv(index=False),
+            file_name=f"transactions_{scope_label}_{date_range[0]}_{date_range[1]}.csv",
+            mime="text/csv",
+            key=f"tx_export_{key_suffix}",
+        )
+
+    if move_clicked:
+        moved = 0
+        for _, row in edited.iterrows():
+            if row["select"]:
+                store.update_bucket(row["txn_id"], bulk_target, "Transactions bulk move")
+                moved += 1
+        invalidate_cache()
+        st.success(f"Moved {moved} transaction(s) to {bulk_target}.")
+        st.rerun()
+
+
 if not all_data.empty:
     with tab_tx:
         st.header("Transactions")
-
-        c1, c2, c3 = st.columns([3, 1, 1])
-        with c1:
-            search = st.text_input("🔎 Search description / reference / payer")
-        with c2:
-            bucket_filter = st.selectbox("Bucket", ["(all)"] + ALL_BUCKETS)
-        with c3:
-            bulk_target_tx = st.selectbox(
-                "Bulk move to →",
-                options=["(pick a bucket)"] + ALL_BUCKETS,
-                key="tx_bulk_target",
-            )
-
-        df = tx_all.copy()
-        if search:
-            sk = search.upper()
-            mask = (
-                df["description"].str.upper().str.contains(sk, na=False)
-                | df["payer"].fillna("").str.upper().str.contains(sk, na=False)
-                | df["reference"].fillna("").str.upper().str.contains(sk, na=False)
-            )
-            df = df[mask]
-        if bucket_filter != "(all)":
-            df = df[df["bucket"] == bucket_filter]
-
-        df = df.sort_values("date", ascending=False)
-        st.markdown(f"**{len(df)} matching transaction(s)**")
-
-        edit_df = df[["txn_id", "date", "source_account", "description", "amount",
-                       "bucket", "asset_tag", "person_tag", "vat", "needs_review"]].copy()
-        tx_force = st.session_state.get("tx_force_select", False)
-        edit_df.insert(0, "select", tx_force)
-
-        sa1, sa2, _ = st.columns([1, 1, 4])
-        with sa1:
-            if st.button("✅ Select all visible", key="tx_select_all"):
-                st.session_state["tx_force_select"] = True
-                st.session_state["tx_nonce"] = st.session_state.get("tx_nonce", 0) + 1
-                st.rerun()
-        with sa2:
-            if st.button("❌ Clear all", key="tx_clear_all"):
-                st.session_state["tx_force_select"] = False
-                st.session_state["tx_nonce"] = st.session_state.get("tx_nonce", 0) + 1
-                st.rerun()
-
-        tx_nonce = st.session_state.get("tx_nonce", 0)
-        edited_tx = st.data_editor(
-            edit_df,
-            use_container_width=True,
-            hide_index=True,
-            height=600,
-            column_config={
-                "select": st.column_config.CheckboxColumn("Select", width="small"),
-                "txn_id": st.column_config.TextColumn("ID", disabled=True, width="small"),
-                "date": st.column_config.DateColumn("Date", disabled=True),
-                "source_account": st.column_config.TextColumn("Account", disabled=True, width="small"),
-                "description": st.column_config.TextColumn("Description", disabled=True, width="large"),
-                "amount": st.column_config.NumberColumn("Amount", disabled=True, format="£%.2f"),
-                "bucket": st.column_config.TextColumn("Bucket", disabled=True),
-                "asset_tag": st.column_config.TextColumn("Vehicle", disabled=True, width="small"),
-                "person_tag": st.column_config.TextColumn("Person", disabled=True, width="small"),
-                "vat": st.column_config.NumberColumn("VAT", disabled=True, format="£%.2f"),
-                "needs_review": st.column_config.CheckboxColumn("Review?", disabled=True, width="small"),
-            },
-            key=f"tx_editor_{tx_nonce}",
+        st.caption(
+            "Each bucket has its own sub-tab — switch between them to see "
+            "the same transactions you'd see on the Dashboard categories."
         )
 
-        selected_count_tx = int(edited_tx["select"].sum())
+        bucket_counts = (
+            tx_all["bucket"].fillna("(no bucket)").value_counts()
+        )
+        # "All" tab first, then one tab per bucket with rows in the current
+        # date/account filter. Buckets with zero rows are hidden.
+        tab_specs = [("All", "all", tx_all)]
+        for bucket_label, count in bucket_counts.items():
+            if bucket_label == "(no bucket)":
+                rows = tx_all[tx_all["bucket"].isna() | (tx_all["bucket"] == "")]
+                suffix = "no_bucket"
+            else:
+                rows = tx_all[tx_all["bucket"] == bucket_label]
+                suffix = (
+                    bucket_label.lower()
+                    .replace(" ", "_").replace("+", "and")
+                )
+            tab_specs.append((f"{bucket_label} ({count:,})", suffix, rows))
 
-        b1, b2 = st.columns([2, 1])
-        with b1:
-            move_clicked_tx = st.button(
-                f"📦 Move {selected_count_tx} selected to {bulk_target_tx}"
-                if bulk_target_tx != "(pick a bucket)" else
-                f"📦 Move {selected_count_tx} selected (pick a bucket first)",
-                type="primary",
-                disabled=(selected_count_tx == 0 or bulk_target_tx == "(pick a bucket)"),
-                key="tx_bulk_move",
-            )
-        with b2:
-            st.download_button(
-                "📥 Export filtered as CSV",
-                df.to_csv(index=False),
-                file_name=f"transactions_{date_range[0]}_{date_range[1]}.csv",
-                mime="text/csv",
-            )
-
-        if move_clicked_tx:
-            moved = 0
-            for _, row in edited_tx.iterrows():
-                if row["select"]:
-                    store.update_bucket(row["txn_id"], bulk_target_tx, "Transactions bulk move")
-                    moved += 1
-            invalidate_cache()
-            st.success(f"Moved {moved} transaction(s) to {bulk_target_tx}.")
-            st.rerun()
+        sub_tabs = st.tabs([s[0] for s in tab_specs])
+        for (label, suffix, scope_df), sub_tab in zip(tab_specs, sub_tabs):
+            with sub_tab:
+                _render_tx_subtab(scope_df, suffix, label.split(" (")[0])
 
 
 # ============================================================
