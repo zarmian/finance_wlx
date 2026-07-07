@@ -262,6 +262,25 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     return df[mask].copy()
 
 
+def search_mask(df: pd.DataFrame, needle: str) -> pd.Series:
+    """
+    Search description + reference + payer, but only include payer when
+    the row is INCOMING. Wise fills the Payer column with the account
+    holder's name (e.g. "Waleed Ahmed") on every outgoing transaction, so
+    including it unconditionally would return every outgoing row for a
+    "waleed" search. This matches core/tagging.py's find_person_tag logic.
+    """
+    sk = needle.upper()
+    desc = df["description"].fillna("").str.upper().str.contains(sk, na=False)
+    ref = df["reference"].fillna("").str.upper().str.contains(sk, na=False)
+
+    payer_up = df["payer"].fillna("").str.upper()
+    incoming = df["amount"] > 0
+    payer = incoming & payer_up.str.contains(sk, na=False)
+
+    return desc | ref | payer
+
+
 # ============================================================
 # Empty-state landing
 # ============================================================
@@ -521,13 +540,7 @@ if not all_data.empty:
 
             filtered = review
             if triage_search:
-                sk = triage_search.upper()
-                mask = (
-                    filtered["description"].fillna("").str.upper().str.contains(sk, na=False)
-                    | filtered["payer"].fillna("").str.upper().str.contains(sk, na=False)
-                    | filtered["reference"].fillna("").str.upper().str.contains(sk, na=False)
-                )
-                filtered = filtered[mask]
+                filtered = filtered[search_mask(filtered, triage_search)]
 
             st.markdown(
                 f"**{len(filtered)} of {len(review)} transaction(s) shown.** "
@@ -711,13 +724,7 @@ def _render_tx_subtab(scope_df: pd.DataFrame, key_suffix: str, scope_label: str)
 
     df = scope_df
     if search:
-        sk = search.upper()
-        mask = (
-            df["description"].str.upper().str.contains(sk, na=False)
-            | df["payer"].fillna("").str.upper().str.contains(sk, na=False)
-            | df["reference"].fillna("").str.upper().str.contains(sk, na=False)
-        )
-        df = df[mask]
+        df = df[search_mask(df, search)]
 
     df = df.sort_values("date", ascending=False)
     total_rows = len(df)
