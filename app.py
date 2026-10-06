@@ -257,7 +257,25 @@ with st.sidebar:
                     "Click the repair button below to fix."
                 )
             if st.button("🩹 Rebuild accounts list from transactions"):
-                added = store.backfill_accounts_from_transactions()
+                # Inline the backfill so this works even when the Store
+                # class in a hot-reloaded container is older than the
+                # app.py it's running under (classic Streamlit stale-
+                # module-cache issue).
+                added = 0
+                if orphan_sources:
+                    from sqlalchemy import text as _sql_text
+                    with store.engine.begin() as _c:
+                        for _name in sorted(orphan_sources):
+                            _c.execute(
+                                _sql_text(
+                                    "INSERT INTO accounts (name, bank, "
+                                    "account_type, currency, notes) "
+                                    "VALUES (:n, '', '', 'GBP', '') "
+                                    "ON CONFLICT (name) DO NOTHING"
+                                ),
+                                {"n": _name},
+                            )
+                            added += 1
                 invalidate_cache()
                 if added:
                     st.success(f"Registered {added} missing account(s).")
