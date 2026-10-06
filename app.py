@@ -821,6 +821,52 @@ def _render_tx_subtab(scope_df: pd.DataFrame, key_suffix: str, scope_label: str)
         st.success(f"Moved {moved} transaction(s) to {bulk_target}.")
         st.rerun()
 
+    # VAT actions on the same selection (20% VAT inclusive is the common case
+    # for this business; zero-rate marks explicitly-no-VAT; clear reverts to
+    # "not yet reviewed" so the row drops out of the VAT return totals).
+    v1, v2, v3 = st.columns(3)
+    with v1:
+        vat_20_clicked = st.button(
+            f"📑 Mark {selected_count} as 20% VAT (gross)",
+            disabled=(selected_count == 0),
+            key=f"tx_vat20_{key_suffix}",
+        )
+    with v2:
+        vat_zero_clicked = st.button(
+            f"🚫 Zero-rate {selected_count}",
+            disabled=(selected_count == 0),
+            key=f"tx_vatzero_{key_suffix}",
+        )
+    with v3:
+        vat_clear_clicked = st.button(
+            f"↩️ Clear VAT on {selected_count}",
+            disabled=(selected_count == 0),
+            key=f"tx_vatclear_{key_suffix}",
+        )
+
+    if vat_20_clicked or vat_zero_clicked or vat_clear_clicked:
+        rate = 0.20 if vat_20_clicked else 0.0 if vat_zero_clicked else None
+        changed = 0
+        for _, row in edited.iterrows():
+            if not row["select"]:
+                continue
+            if vat_clear_clicked:
+                store.update_vat(row["txn_id"], None, None)
+            elif vat_zero_clicked:
+                store.update_vat(row["txn_id"], 0.0, 0.0)
+            else:
+                vat_amt = calc_vat_amount(row["amount"], 0.20, is_gross=True)
+                store.update_vat(row["txn_id"], vat_amt, 0.20)
+            changed += 1
+        invalidate_cache()
+        verb = (
+            "zero-rated" if vat_zero_clicked
+            else "cleared VAT on" if vat_clear_clicked
+            else "marked 20% VAT on"
+        )
+        st.success(f"{verb.capitalize()} {changed} transaction(s).")
+        st.rerun()
+
 
 if not all_data.empty:
     with tab_tx:
