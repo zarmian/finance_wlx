@@ -40,10 +40,12 @@ def ingest_file(filepath: str | Path, source_account: str,
     fmt = force_format or detect_format(filepath)
     txns = parse(filepath, source_account, force_format=fmt)
 
-    # Apply rules then tagging. Skip rules if the adapter already pinned
-    # a bucket (e.g. welux_history XLSX preserves manual classifications).
+    # Apply rules then tagging. Skip rules when the adapter has already
+    # decided — either by pinning a bucket (welux_history XLSX) or by
+    # setting rule_applied to signal "leave this for manual triage"
+    # (amex_pdf — personal/business mix needs human judgement).
     for t in txns:
-        if not t.bucket:
+        if not t.bucket and not t.rule_applied:
             apply_rules(t)
         apply_tags(t)
 
