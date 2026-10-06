@@ -949,7 +949,7 @@ with (tab_import if not all_data.empty else st.container()):
 
         force_format = st.selectbox(
             "Force format (override detection)",
-            ["(use detected)", "wise", "monzo", "uk_generic", "pdf", "welux_history"],
+            ["(use detected)", "wise", "monzo", "uk_generic", "pdf", "amex_pdf", "welux_history"],
         )
         force_arg = "" if force_format == "(use detected)" else force_format
 

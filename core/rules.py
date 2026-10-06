@@ -60,6 +60,7 @@ INCOMING_BUCKETS = [
     "EQV IN",
     "KM20YYX IN",
     "MISC PAYMENT IN",
+    "AMEX SETTLEMENT",
 ]
 
 OUTGOING_BUCKETS = [
@@ -75,6 +76,7 @@ OUTGOING_BUCKETS = [
     "IMRAN EXPENSE",
     "WAYZ MOTORS",
     "1ST NATIONWIDE",
+    "AMEX SETTLEMENT",
 ]
 
 ALL_BUCKETS = INCOMING_BUCKETS + OUTGOING_BUCKETS
@@ -414,6 +416,13 @@ def route(txn: Transaction) -> RoutingResult:
                 or _contains_token(match_key, "CA71ADZ")
                 or _contains_token(match_key, "BO07CEO")):
             return RoutingResult("WALEED EXPENSE", "outgoing.waleed_personal_vehicle")
+
+        # Rule 3d: Wise -> American Express is the monthly card-balance
+        # settlement, not an expense. The underlying merchant charges live
+        # on the Amex PDF statements (imported separately) — this is just
+        # the inter-account transfer that clears the Amex balance.
+        if "AMERICAN EXPRESS" in match_key:
+            return RoutingResult("AMEX SETTLEMENT", "outgoing.amex_settlement")
 
         # Rule 4: TYPE-gated card payment routing
         if type_upper == "CARD_PAYMENT":

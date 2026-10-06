@@ -16,15 +16,20 @@ from adapters.uk_generic import parse_uk_generic_csv
 from adapters.welux_history import (
     parse_welux_history_xlsx, looks_like_welux_history,
 )
+from adapters.amex_pdf import parse_amex_pdf, looks_like_amex_pdf
 
 
 def detect_format(filepath: str | Path) -> str:
     """Returns one of: 'wise', 'monzo', 'uk_generic', 'welux_history',
-    'pdf', 'unknown'."""
+    'amex_pdf', 'pdf', 'unknown'."""
     filepath = Path(filepath)
     suffix = filepath.suffix.lower()
 
     if suffix == ".pdf":
+        # Peek inside — Amex Business Gold statements get a dedicated
+        # adapter; anything else falls back to the generic PDF parser.
+        if looks_like_amex_pdf(filepath):
+            return "amex_pdf"
         return "pdf"
 
     if suffix in (".xlsx", ".xls"):
@@ -62,6 +67,8 @@ def parse(filepath: str | Path, source_account: str,
         return parse_uk_generic_csv(filepath, source_account)
     if fmt == "welux_history":
         return parse_welux_history_xlsx(filepath, source_account)
+    if fmt == "amex_pdf":
+        return parse_amex_pdf(filepath, source_account)
     if fmt == "pdf":
         from adapters.pdf_generic import parse_pdf_statement
         return parse_pdf_statement(filepath, source_account)
