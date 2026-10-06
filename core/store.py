@@ -147,6 +147,15 @@ class Store:
         self.is_sqlite = self.db_url.startswith("sqlite")
         if not Store._schema_initialized:
             self._init_schema()
+            # Repair any historical imports where an adapter overrode
+            # source_account without the caller knowing — otherwise the
+            # sidebar Accounts filter silently excludes those rows.
+            try:
+                self.backfill_accounts_from_transactions()
+            except Exception:
+                # Non-fatal: if backfill fails for any reason, the app
+                # still works; the user will just need to re-import.
+                pass
             Store._schema_initialized = True
 
     def backend_summary(self) -> dict:
@@ -217,6 +226,27 @@ class Store:
 
     def list_accounts(self) -> pd.DataFrame:
         return pd.read_sql_query("SELECT * FROM accounts ORDER BY name", self.engine)
+
+    def backfill_accounts_from_transactions(self) -> int:
+        """
+        Rebuild `accounts` for every distinct source_account present in
+        the transactions table but missing from accounts. Fixes
+        historical imports where an adapter overrode source_account
+        without the caller knowing. Returns how many new rows were
+        inserted.
+        """
+        existing = set(pd.read_sql_query(
+            "SELECT name FROM accounts", self.engine
+        )["name"].tolist())
+        in_tx = set(pd.read_sql_query(
+            "SELECT DISTINCT source_account FROM transactions "
+            "WHERE source_account IS NOT NULL AND source_account != ''",
+            self.engine,
+        )["source_account"].tolist())
+        missing = in_tx - existing
+        for name in missing:
+            self.upsert_account(name)
+        return len(missing)
 
     # ---------- Transaction insert ----------
 

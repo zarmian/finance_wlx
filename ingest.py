@@ -49,8 +49,13 @@ def ingest_file(filepath: str | Path, source_account: str,
             apply_rules(t)
         apply_tags(t)
 
-    # Ensure account exists (creates it if it's the first time)
-    store.upsert_account(source_account)
+    # Ensure every source_account referenced by the parsed txns exists in
+    # the accounts table. Some adapters override the caller-supplied
+    # source_account (amex_pdf splits by cardholder), so we upsert the
+    # distinct set from the parsed transactions, not just the arg.
+    distinct_sources = {t.source_account for t in txns} or {source_account}
+    for s in distinct_sources:
+        store.upsert_account(s)
 
     # Historical XLSX should override bucket on existing rows so the
     # manual classification wins over any earlier rule-based import.
