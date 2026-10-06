@@ -839,10 +839,26 @@ def _render_tx_subtab(scope_df: pd.DataFrame, key_suffix: str, scope_label: str)
     in_total = df.loc[df["amount"] > 0, "amount"].sum()
     out_total = abs(df.loc[df["amount"] < 0, "amount"].sum())
     net = in_total - out_total
+
+    # VAT split: positive-amount rows contribute to "VAT in" (output VAT
+    # on sales for the VAT return Box 1), negative-amount rows contribute
+    # to "VAT out" (input VAT reclaimable, Box 4). Coverage shows how
+    # many rows have VAT explicitly set so you can see what's left.
+    vat_in = df.loc[(df["amount"] > 0) & (df["vat"].notna()), "vat"].sum()
+    vat_out = abs(df.loc[(df["amount"] < 0) & (df["vat"].notna()), "vat"].sum())
+    vat_net = vat_in - vat_out
+    vat_set_count = int(df["vat"].notna().sum())
+    vat_coverage = (100 * vat_set_count / total_rows) if total_rows else 0
+
     st.markdown(
         f"**Totals — {scope_label} · {total_rows:,} row(s)**  ·  "
         f"In: £{in_total:,.2f}  ·  Out: £{out_total:,.2f}  ·  "
         f"Net: £{net:,.2f}"
+    )
+    st.markdown(
+        f"**VAT — {vat_set_count}/{total_rows} rows set ({vat_coverage:.0f}%)**  ·  "
+        f"VAT In: £{vat_in:,.2f}  ·  VAT Out: £{vat_out:,.2f}  ·  "
+        f"VAT Net: £{vat_net:,.2f}"
     )
 
     selected_count = int(edited["select"].sum())
