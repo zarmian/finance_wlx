@@ -230,6 +230,42 @@ with st.sidebar:
                 st.rerun()
 
         st.divider()
+        with st.expander("🔧 Diagnostics"):
+            # Shows what the backend actually sees vs what the sidebar
+            # filter sees. If an account appears in transactions but not
+            # in Known accounts, the Repair button rebuilds the accounts
+            # table from the transactions.source_account column.
+            import pandas as _pd
+            tx_src_counts = _pd.read_sql_query(
+                "SELECT source_account, COUNT(*) AS n FROM transactions "
+                "GROUP BY source_account ORDER BY n DESC",
+                store.engine,
+            )
+            st.markdown("**Known accounts (from `accounts` table):**")
+            st.write(sorted(accounts["name"].tolist()) if not accounts.empty else "(none)")
+            st.markdown("**source_account values present in `transactions`:**")
+            st.dataframe(tx_src_counts, use_container_width=True, hide_index=True)
+
+            orphan_sources = (
+                set(tx_src_counts["source_account"].tolist())
+                - set(accounts["name"].tolist() if not accounts.empty else [])
+            )
+            if orphan_sources:
+                st.warning(
+                    f"{len(orphan_sources)} account(s) have transactions but "
+                    f"aren't registered: `{', '.join(sorted(orphan_sources))}`. "
+                    "Click the repair button below to fix."
+                )
+            if st.button("🩹 Rebuild accounts list from transactions"):
+                added = store.backfill_accounts_from_transactions()
+                invalidate_cache()
+                if added:
+                    st.success(f"Registered {added} missing account(s).")
+                else:
+                    st.info("All source_accounts already registered — nothing to add.")
+                st.rerun()
+
+        st.divider()
         with st.expander("⚠️ Danger zone"):
             st.caption(
                 "Wipes every transaction and the move log. Accounts and "
